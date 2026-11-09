@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sidebar panel organizer",
+    "description": "Fold, reorder and hide the entries in the left sidebar's global panel list: the whole row is a drag handle, right-click any panel to move or hide it in place, and the settings survive a restart."
+  }
+}

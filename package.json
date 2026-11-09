@@ -1,0 +1,52 @@
+{
+  "name": "dsh-sidebar-panels",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "侧边栏全局面板列表管理：折叠成一组、拖拽排序、隐藏不想看的入口",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lyjyy/dsh-sidebar-panels.git"
+  },
+  "homepage": "https://github.com/lyjyy/dsh-sidebar-panels#readme",
+  "bugs": {
+    "url": "https://github.com/lyjyy/dsh-sidebar-panels/issues"
+  },
+  "author": "lyjyy",
+  "icon": "icon.svg",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh-plugin",
+    "sidebar",
+    "panels"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/en.json",
+    "locale/zh.json",
+    "icon.svg",
+    "README.md",
+    "test/selfcheck.mjs",
+    "test/drop-index.mjs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}

@@ -1,0 +1,6 @@
+# dsh bundle patch: installs the sidebar panel-list manager.
+# The row's Host half is a no-op; the `dsh.client` block in package.json makes
+# the web app also load ./client.js as the browser half.
+- insert:
+    - id: dsh-sidebar-panels
+      name: 'dsh-sidebar-panels'
