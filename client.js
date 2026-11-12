@@ -141,13 +141,22 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 在 DOM 里认出官方列表：行是带 `aria-label` 的按钮，同一父节点下成组出现。
-     * 只认「同父节点下至少两行」的组，避免把别处的同名按钮算进来。
+     * 把「DOM 里认出来的行」和「slots 报上来的面板条目」配成对（纯函数，可单测）。
+     *
+     * 两遍配对：
+     *   1. 按 label 精确配，同名按出现顺序依次消耗；
+     *   2. 剩下没配上的行与条目，各自按顺序补齐。
+     * 第二遍是给「label 与 aria-label 不完全一致」留的后路（比如某个面板自己改了
+     * 无障碍名称）。宁可配错顺序也不要整片失效——整片失效正是 0.1.0 的故障形态。
+     *
+     * @param {Array<{el: any, button: any, label: string}>} domRows 按 DOM 顺序的行。
+     * @param {Array<{id: string, label: string}>} entries slots 报上来的面板（调用方先排好序）。
+     * @returns {Array<{id: string, label: string, el: any, button: any}>}
      */
-    function locate() {
-      if (typeof document === 'undefined') return null;
-      const entries = panelEntries();
-      if (entries.length === 0) return null;
+    function pairRows(domRows, entries) {
+      const out = [];
+      const usedId = new Set();
+      const usedRow = new Set();
 
       const byLabel = new Map();
       for (const entry of entries) {
@@ -156,54 +165,196 @@ window.__ModuleLoader__.load({
         if (bucket === undefined) byLabel.set(entry.label, [entry.id]);
         else bucket.push(entry.id);
       }
+      for (let i = 0; i < domRows.length; i += 1) {
+        const row = domRows[i];
+        const bucket = byLabel.get(row.label);
+        if (bucket === undefined) continue;
+        let id;
+        while (bucket.length > 0 && id === undefined) {
+          const candidate = bucket.shift();
+          if (usedId.has(candidate)) continue;
+          id = candidate;
+        }
+        if (id === undefined) continue;
+        usedId.add(id);
+        usedRow.add(i);
+        out.push({ id, label: row.label, el: row.el, button: row.button });
+      }
+
+      // 第二遍：没配上的按顺序对齐，只处理「两侧都还有剩」的情况。
+      // 空 label 的行不参与：那不是我们认得出的面板行，随便配一个 id 只会让它
+      // 顶替别人的位次（真实 DOM 里 nav 还塞着 More、purp 图钉等按钮）。
+      const spareEntries = entries.filter((entry) => !usedId.has(entry.id) && entry.label !== '');
+      const spareRows = [];
+      for (let i = 0; i < domRows.length; i += 1) {
+        if (!usedRow.has(i) && domRows[i].label !== '') spareRows.push(domRows[i]);
+      }
+      const n = Math.min(spareEntries.length, spareRows.length);
+      for (let i = 0; i < n; i += 1) {
+        const entry = spareEntries[i];
+        const row = spareRows[i];
+        usedId.add(entry.id);
+        out.push({ id: entry.id, label: entry.label, el: row.el, button: row.button });
+      }
+      return out;
+    }
+
+    /**
+     * 找到侧栏的 `<nav>` 面板列表。
+     *
+     * 锚点从「行按钮的父节点」改成了「More 按钮所在的 nav」：0.2.2-rc.2 把每一行
+     * 包进了 `<div class="panelEntry">`，nav 的直接子节点不再有 button，旧锚点会
+     * 静默返回 null，于是折叠/排序/隐藏全部失效。
+     * More 按钮（`aria-haspopup="menu"`）由官方在 `sidebar.panellist.actions` 有注册
+     * 项时渲染，本插件正是注册方，所以它必然存在，比行结构稳定。
+     */
+    function findNav() {
+      if (typeof document === 'undefined') return null;
+      try {
+        const more = document.querySelector('nav button[aria-haspopup="menu"]');
+        if (more !== null) {
+          const nav = typeof more.closest === 'function' ? more.closest('nav') : more.parentElement;
+          // 认错了 nav 的话，行一条也配不上，交给下面按 label 的兜底再试一次。
+          if (nav !== null && navHasRows(nav)) return nav;
+        }
+      } catch {
+        /* 选择器不可用等异常：走兜底 */
+      }
+      return fallbackNav();
+    }
+
+    /** nav 里是否有我们认识的面板行（不依赖行被包在哪一层）。 */
+    function navHasRows(nav) {
+      const entries = panelEntries();
+      if (entries.length === 0) return false;
+      const labels = new Set();
+      for (const entry of entries) if (entry.label !== '') labels.add(entry.label);
+      if (labels.size === 0) return false;
+      const buttons = nav.querySelectorAll('button[aria-label]');
+      for (const button of buttons) {
+        if (labels.has(button.getAttribute('aria-label'))) return true;
+      }
+      return false;
+    }
+
+    /** 兜底锚点：沿用旧办法，取「同父节点下成组出现、且要知道的 label」的父节点。 */
+    function fallbackNav() {
+      const entries = panelEntries();
+      if (entries.length === 0) return null;
+      const labels = new Set();
+      for (const entry of entries) if (entry.label !== '') labels.add(entry.label);
+      if (labels.size === 0) return null;
 
       const groups = new Map();
-      const buttons = document.querySelectorAll('button[aria-label]');
-      for (const el of buttons) {
-        const label = el.getAttribute('aria-label');
-        const bucket = byLabel.get(label);
-        if (bucket === undefined) continue;
+      for (const el of document.querySelectorAll('button[aria-label]')) {
+        if (!labels.has(el.getAttribute('aria-label'))) continue;
         const parent = el.parentElement;
         if (parent === null) continue;
         const group = groups.get(parent);
-        if (group === undefined) groups.set(parent, [{ el, label }]);
-        else group.push({ el, label });
+        if (group === undefined) groups.set(parent, 1);
+        else groups.set(parent, group + 1);
       }
-
       let best = null;
-      for (const [parent, group] of groups) {
-        if (group.length < 2) continue;
-        if (best === null || group.length > best.group.length) best = { parent, group };
-      }
-      if (best === null) return null;
-
-      const nav = best.parent;
-      // 只取直接子节点里的按钮 = 列表行（More 那行在包装元素里，不算）。
-      const domButtons = [];
-      for (const child of nav.children) {
-        if (typeof child.matches === 'function' && child.matches('button[aria-label]')) {
-          domButtons.push(child);
+      let bestCount = 0;
+      for (const [parent, count] of groups) {
+        if (count < 1) continue;
+        if (count > bestCount) {
+          best = parent;
+          bestCount = count;
         }
       }
-      const rows = [];
-      const consumed = new Map();
-      for (const el of domButtons) {
-        const label = el.getAttribute('aria-label');
-        const bucket = byLabel.get(label) || [];
-        const used = consumed.get(label) || 0;
-        consumed.set(label, used + 1);
-        // 同名的多个面板按出现顺序依次配对；配不上就跳过（不去猜）。
-        const id = bucket[used];
-        if (id === undefined) continue;
-        rows.push({ id, label, el });
+      return best;
+    }
+
+    /**
+     * 一个 nav 直接子节点里承载 aria-label 按钮的元素：行容器本身，或它的后代。
+     *
+     * 「更多」那一行的按钮带 `aria-haspopup="menu"`，它不是面板行——它是 actions 菜单的
+     * 启动器。必须排除，否则它会冒充某个「已注册但从 DOM 里消失了」的面板（被官方图钉
+     * 取消固定时正是这种情况），把那一格的位次与标签整个对错。
+     */
+    function rowButtonOf(child) {
+      const isMenuTrigger = (el) => typeof el.getAttribute === 'function'
+        && el.getAttribute('aria-haspopup') !== null;
+      if (typeof child.matches === 'function' && child.matches('button[aria-label]')) {
+        if (isMenuTrigger(child)) return null;
+        return { el: child, button: child };
       }
-      if (rows.length === 0) return null;
+      if (typeof child.querySelector === 'function') {
+        for (const candidate of child.querySelectorAll('button[aria-label]')) {
+          if (isMenuTrigger(candidate)) continue;
+          // el 是行容器：style.order / style.display 必须写在它上面，
+          // 否则隐藏不掉 0.2.2-rc.2 新加的 panelUnpin 小图钉。
+          return { el: child, button: candidate };
+        }
+      }
+      return null;
+    }
+
+    /**
+     * 在 DOM 里认出官方列表：行是带 `aria-label` 的按钮，同一父节点下成组出现。
+     * 0.2.2-rc.2 起每行被 `<div class="panelEntry">` 包着，故行容器与按钮要分开记住。
+     */
+    function locate() {
+      if (typeof document === 'undefined') return null;
+      const entries = panelEntries();
+      if (entries.length === 0) return null;
+
+      const nav = findNav();
+      if (nav === null) {
+        warnLocateFailure(0, 0);
+        return null;
+      }
+
+      const expander = nav.querySelector('[' + EXPANDER_ATTR + ']');
+      const domRows = [];
+      for (const child of nav.children) {
+        if (child === expander) continue;
+        const found = rowButtonOf(child);
+        if (found === null) continue;
+        domRows.push({
+          el: found.el,
+          button: found.button,
+          label: found.button.getAttribute('aria-label') || '',
+        });
+      }
+      if (domRows.length === 0) {
+        warnLocateFailure(1, entries.length);
+        return null;
+      }
+
+      // 面板元数据按 order 排好，配对时用它当 id 来源（不是 DOM 顺序）。
+      const rows = pairRows(domRows, entries);
+      if (rows.length === 0) {
+        warnLocateFailure(1, entries.length);
+        return null;
+      }
       return { nav, rows };
+    }
+
+    /** locate() 失败只报一次，避免 900ms 轮询把控制台刷满。 */
+    let locateWarned = false;
+    function warnLocateFailure(navFound, entryCount) {
+      if (locateWarned) return;
+      locateWarned = true;
+      try {
+        console.warn('sidebar-panels: could not locate the sidebar panel list', {
+          navFound,
+          entryCount,
+          reason: navFound === 0
+            ? 'no nav with the More button (aria-haspopup=menu) was found'
+            : 'the nav has no row matching a registered panel label',
+          hint: 'the sidebar DOM probably changed in a DSH upgrade; locate() needs updating',
+        });
+      } catch {
+        /* console may be unavailable */
+      }
     }
 
     /** More 那一行的包装元素：里面有 aria-haspopup=menu 的按钮。 */
     function moreChild(nav) {
       for (const child of nav.children) {
+        if (typeof child.matches === 'function' && child.matches('[aria-haspopup="menu"]')) return child;
         if (typeof child.querySelector !== 'function') continue;
         if (child.querySelector('[aria-haspopup="menu"]') !== null) return child;
       }
@@ -260,6 +411,14 @@ window.__ModuleLoader__.load({
     }
 
     // ── 排版应用 ──
+    /**
+     * 把保存的顺序与当前注册的面板合并。
+     *
+     * `ids` 必须是**全部已注册**的 id（来自 slots），不能是「DOM 里当前存在的行」。
+     * 0.2.2-rc.2 起官方自带「取消固定」：面板会直接从渲染列表里消失，但仍然是注册的。
+     * 旧实现只保留 DOM 里存在的 id，于是用户点一下小图钉就把该面板的排序位置永久抹掉了；
+     * 现在只有「真的注销了」的 id 才会被剪掉。
+     */
     function mergeOrder(ids) {
       const known = [];
       for (const id of state.order) {
@@ -271,6 +430,11 @@ window.__ModuleLoader__.load({
       return known;
     }
 
+    /** 当前注册的全部面板 id，按官方 order 排好（= 未排序时的默认顺序）。 */
+    function registeredIds() {
+      return panelEntries().map((entry) => entry.id);
+    }
+
     /**
      * 把保存的折叠/顺序/隐藏状态刷到官方列表上。
      * 只写 style，不移动节点 —— React 的 keyed 列表下次 reconcile 不会打架。
@@ -280,8 +444,9 @@ window.__ModuleLoader__.load({
       if (found === null) return null;
       const { nav, rows } = found;
       const entries = panelEntries();
-      const ids = rows.map((row) => row.id);
-      const merged = mergeOrder(ids);
+      // 顺序的 id 宇宙是「全部已注册的面板」，不是「DOM 里当前渲染出来的行」：
+      // 被官方原生取消固定的面板不在 DOM 里，但位次必须留着。
+      const merged = mergeOrder(entries.map((entry) => entry.id));
       if (merged.join('|') !== state.order.join('|')) {
         state.order = merged;
         save();
@@ -299,10 +464,14 @@ window.__ModuleLoader__.load({
         }
       }
 
+      // 56px 轨道形态下整个面板列表本来就是 display:none（官方 CSS），
+      // 此时不要再把我们那行也藏掉，否则轨道里没有入口可把「已折叠」改回来。
+      const rail = nav.clientWidth > 0 && nav.clientWidth < 80;
+
       for (const row of rows) {
         const index = merged.indexOf(row.id);
         const hidden = state.hidden.indexOf(row.id) !== -1;
-        const collapseOut = state.collapsed && keptIds.indexOf(row.id) === -1;
+        const collapseOut = !rail && state.collapsed && keptIds.indexOf(row.id) === -1;
         if (hidden || collapseOut) {
           row.el.style.display = 'none';
           continue;
@@ -366,9 +535,10 @@ window.__ModuleLoader__.load({
     }
 
     // ── 排序操作 ──
+    // 排序的基准列表同样取「全部已注册的面板」：被原生取消固定的条目在 DOM 里看不见，
+    // 但它仍然占着管理面板里的一行，上移/下移必须对它生效，而且不能把它的位次挤掉。
     function moveId(id, delta) {
-      const found = locate();
-      const ids = found === null ? state.order.slice() : mergeOrder(found.rows.map((row) => row.id));
+      const ids = mergeOrder(registeredIds());
       const from = ids.indexOf(id);
       if (from === -1) return;
       const to = from + delta;
@@ -379,8 +549,7 @@ window.__ModuleLoader__.load({
     }
 
     function moveIdTo(id, index) {
-      const found = locate();
-      const ids = found === null ? state.order.slice() : mergeOrder(found.rows.map((row) => row.id));
+      const ids = mergeOrder(registeredIds());
       const from = ids.indexOf(id);
       if (from === -1) return;
       const to = Math.max(0, Math.min(ids.length - 1, index));
@@ -441,8 +610,8 @@ window.__ModuleLoader__.load({
     function RowMenuCard({ t, id }) {
       const entries = panelEntries();
       const entry = entries.find((item) => item.id === id) || { id, label: id };
-      const found = locate();
-      const ids = found === null ? state.order.slice() : mergeOrder(found.rows.map((row) => row.id));
+      // 与 moveId / moveIdTo 用同一份基准列表，否则菜单里的禁用态会和实际操作对不上。
+      const ids = mergeOrder(entries.map((item) => item.id));
       const at = ids.indexOf(id);
       const isHidden = state.hidden.indexOf(id) !== -1;
       const item = (label, glyph, onClick, disabled) => React.createElement('button', {
@@ -840,7 +1009,9 @@ window.__ModuleLoader__.load({
           if (!target || typeof target.closest !== 'function') return;
           const button = target.closest('button[aria-label]');
           if (button === null) return;
-          const row = found.rows.find((candidate) => candidate.el === button || candidate.el.contains(button));
+          // 严格按「行自己的那个按钮」匹配：0.2.2-rc.2 的 panelEntry 里还嵌着
+          // 官方的 panelUnpin（也有 aria-label），用 contains 会把右键落到图钉上。
+          const row = found.rows.find((candidate) => candidate.button === button);
           if (row === undefined) return;
           event.preventDefault();
           event.stopPropagation();
@@ -876,7 +1047,13 @@ window.__ModuleLoader__.load({
         state,
         applyLayout: () => layout(t),
         locate,
+        findNav,
+        pairRows,
+        rowButtonOf,
         panelEntries,
+        registeredIds,
+        mergeOrder,
+        computeDropIndex,
         moveId,
         moveIdTo,
         toggleHidden,

@@ -57,6 +57,65 @@ ok('读写 localStorage', client.includes('setItem') && client.includes('getItem
 ok('存储键固定', client.includes("dsh-sidebar-panels:v1"))
 ok('损坏值不致命', /catch\s*\{/.test(client) && client.includes('a corrupt value must never block the feature'))
 
+console.log('— DSH 0.2.2-rc.2 行结构兼容 —')
+// 0.1.0 的真实故障：官方把每一行包进 <div class="panelEntry">，nav 的直接子节点
+// 不再有 button，locate() 静默返回 null，折叠/排序/隐藏全部失效。
+// 这几条断言盯着「认行」的写法，改回旧写法任何一条都会红。
+const locateBody = (() => {
+  const start = code.indexOf('function locate')
+  if (start === -1) return ''
+  let depth = 0
+  for (let i = code.indexOf('{', start); i < code.length; i += 1) {
+    if (code[i] === '{') depth += 1
+    else if (code[i] === '}') {
+      depth -= 1
+      if (depth === 0) return code.slice(start, i + 1)
+    }
+  }
+  return ''
+})()
+ok('找到 locate 函数体', locateBody.length > 0)
+// 判别1：行容器与按钮必须分开存（.el 是容器、.button 是按钮）。
+ok('有 rowButtonOf 拆容器与按钮',
+  /function rowButtonOf/.test(code)
+  && /return \{ el: child, button: candidate \}/.test(code)
+  && /return \{ el: child, button: child \}/.test(code))
+// 判别1b：「更多」按钮带 aria-haspopup=menu，不是面板行；不排除它会冒充
+// 被官方图钉取消固定（从 DOM 消失）的那个面板，把整行 id 对错。
+ok('rowButtonOf 排除 aria-haspopup 菜单启动器', /isMenuTrigger/.test(code) && /aria-haspopup/.test(code))
+// 判别2：nav 锚点不许再依赖「直接子节点就是 button」。
+ok("findNav 用 closest('nav') 锚点", /closest\('nav'\)/.test(code))
+ok('findNav 认 More 按钮当锚点', /querySelector\('nav button\[aria-haspopup="menu"\]'\)/.test(code))
+// 判别3：locate 不得自己遍历 nav.children 去 matches('button[aria-label]') 当唯一来源。
+ok('locate 走 rowButtonOf 而不是自己判 button',
+  locateBody.includes('rowButtonOf(child)') && !/child\.matches\('button\[aria-label\]'\)/.test(locateBody))
+// 判别4：样式必须写在行容器上，否则藏不掉 rc.2 新加的 panelUnpin。
+ok('style 写在 row.el（行容器）上', /row\.el\.style\.order/.test(code) && /row\.el\.style\.display/.test(code))
+ok('没有把 style 写到 row.button 上', !/row\.button\.style/.test(code))
+// 判别5：右键严格按行自己的按钮匹配，别被 panelUnpin 抢走。
+ok('右键按 candidate.button 严格匹配', /candidate\.button === button/.test(code))
+// 判别6：定位失败要出声，不许再静默。
+ok('定位失败有一次性 warn', /function warnLocateFailure/.test(code) && /could not locate the sidebar panel list/.test(code))
+ok('warn 只报一次', /if \(locateWarned\) return;/.test(code))
+
+console.log('— 顺序 id 宇宙 —')
+// rc.2 官方自带「取消固定」：面板会从渲染列表消失但仍然是注册的。
+// 旧实现只保留 DOM 里存在的 id ⇒ 点一下小图钉就把用户排好的位次永久抹掉。
+ok('有 registeredIds 取自 slots', /function registeredIds\(\)[\s\S]{0,90}panelEntries\(\)\.map/.test(code))
+ok('mergeOrder 只保留 ids 里有的（剪掉注销项）', /for \(const id of state\.order\) \{\s*if \(ids\.indexOf\(id\) !== -1/.test(code))
+ok('layout 用注册 id 计算顺序', /mergeOrder\(entries\.map\(\(entry\) => entry\.id\)\)/.test(code))
+ok('moveId 用 registeredIds', /const ids = mergeOrder\(registeredIds\(\)\)/.test(code))
+ok('moveIdTo 用 registeredIds', (code.match(/mergeOrder\(registeredIds\(\)\)/g) || []).length >= 2)
+ok('不再拿 DOM 行当 id 来源', !/mergeOrder\(found\.rows\.map/.test(code))
+
+console.log('— 轨道态可达性 —')
+// 56px 轨道下官方 CSS 把整个 panelList 隐藏；我们那行不能再自隐藏，
+// 否则「已折叠」在 UI 里没有任何入口能改回来。
+ok('layout 判定了 rail 态', /const rail = nav\.clientWidth > 0 && nav\.clientWidth < 80/.test(code))
+ok('rail 态下不做折叠隐藏', /const collapseOut = !rail && state\.collapsed/.test(code))
+// 判据不许用 CSS module 哈希类名。
+ok('rail 判据不是哈希类名', !/wtg9ga_/.test(code))
+
 console.log('— 展平器常驻 —')
 // 早期版本把入口行只在「折叠或隐藏后」显示，等于默认状态下根本没有入口，
 // 用户看到的功能就像不存在。这里做**结构断言**：抽出 paintExpander 函数体，
