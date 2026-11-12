@@ -1042,29 +1042,10 @@ window.__ModuleLoader__.load({
         document.addEventListener('keydown', onKey);
         return () => document.removeEventListener('keydown', onKey);
       }, 'sidebar-panels: escape');
-
-      exports.__internal = {
-        state,
-        applyLayout: () => layout(t),
-        locate,
-        findNav,
-        pairRows,
-        rowButtonOf,
-        panelEntries,
-        registeredIds,
-        mergeOrder,
-        computeDropIndex,
-        moveId,
-        moveIdTo,
-        toggleHidden,
-        commit,
-        openRowMenu,
-        openManager,
-        closeOverlay,
-        t,
-      };
     }
 
+    // 导出面只留两个：应用入口与注入声明。单元测试按源码切片取纯函数，
+    // 不依赖任何调试导出，故这里不再暴露内部实现。
     exports.apply = apply;
     exports.inject = ['slots', 'locale'];
     return module.exports;

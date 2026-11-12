@@ -1,6 +1,6 @@
 {
   "name": "dsh-sidebar-panels",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "侧边栏全局面板列表管理：折叠成一组、拖拽排序、隐藏不想看的入口",
   "license": "MIT",

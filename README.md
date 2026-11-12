@@ -71,12 +71,15 @@ node test/row-match.mjs   # 15 项「DOM 行 ↔ slot 面板」配对单测
 node test/locate-rc2.mjs  # 18 项 locate() 全链路单测（照着 0.2.2-rc.2 真实 DOM 捏的假 DOM）
 ```
 
+> 仓库里只放插件本身。内部交接、迁移说明这类含本机路径的过程文档一律不进本仓库（放 E 盘私有归档区），别依赖 `.gitignore` 兜底。
+
 自检里的断言能用注释剥离、能真正变红——改错实现就会 FAIL。`locate-rc2.mjs` 尤其值得留意：它用一份照着实测快照捏出来的假 DOM 跑 `locate()`，这一版就是靠它抓出了「更多」按钮冒充面板行的问题。插件是纯浏览器端改造（`index.js` 的 host 半边是空壳），**改完不用重启 DSH**，刷新页面即可。
 
 ## 版本
 
-当前 **0.2.0**。历史版本见 [Releases](https://github.com/lyjyy/dsh-sidebar-panels/releases)。
+当前 **0.2.1**。历史版本见 [Releases](https://github.com/lyjyy/dsh-sidebar-panels/releases)。
 
+- **0.2.1**：仓库清理版，无运行时变更。删掉误提交进公开仓库的内部迁移说明（含本机路径），收敛 `client.js` 的导出面，`.gitignore` 补上同类文档规则。
 - **0.2.0**：适配 DSH 0.2.2-rc.2 的侧边栏行结构（`div.panelEntry` 包裹）。此前 0.1.0 在新版上静默失效：`locate()` 认不出任何行，折叠/排序/隐藏全都不生效。同时修掉「官方取消固定会把用户排序位次抹掉」的回归，并为 56px 轨道形态加了可达性守卫。
 - **0.1.0**：首个版本。
 
